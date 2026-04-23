@@ -1,0 +1,14 @@
+name: RandomTP
+version: 1.0
+main: tamakake.RandomTPPlugin
+api-version: 1.21
+
+commands:
+  rtp:
+    description: ランダムテレポート
+    usage: /rtp
+    permission: randomtp.use
+
+permissions:
+  randomtp.use:
+    default: true
