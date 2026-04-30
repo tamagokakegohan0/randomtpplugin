@@ -3,6 +3,7 @@ package tamakake;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
+import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -35,9 +36,6 @@ public class RandomTPPlugin extends JavaPlugin {
 
         long now = System.currentTimeMillis();
 
-        // =====================
-        // クールダウン
-        // =====================
         if (cooldown.containsKey(uuid)) {
             long last = cooldown.get(uuid);
             if ((now - last) < cooldownSec * 1000L) {
@@ -47,13 +45,8 @@ public class RandomTPPlugin extends JavaPlugin {
         }
 
         cooldown.put(uuid, now);
-
-        // 初期位置保存
         startLocation.put(uuid, player.getLocation().clone());
 
-        // =====================
-        // カウントダウン
-        // =====================
         new BukkitRunnable() {
 
             int sec = delay;
@@ -70,10 +63,9 @@ public class RandomTPPlugin extends JavaPlugin {
                 Location before = startLocation.get(uuid);
                 Location nowLoc = p.getLocation();
 
-                // 移動キャンセル
                 if (before == null ||
-                        before.getWorld() != nowLoc.getWorld() ||
-                        before.distance(nowLoc) > 0.5) {
+                        !before.getWorld().equals(nowLoc.getWorld()) ||
+                        before.distanceSquared(nowLoc) > 0.25) {
 
                     p.performCommand("playsound minecraft:entity.villager.no player @s ~ ~ ~ 1 1");
 
@@ -84,26 +76,17 @@ public class RandomTPPlugin extends JavaPlugin {
                     return;
                 }
 
-                // =====================
-                // 0秒で実行
-                // =====================
                 if (sec <= 0) {
                     cancel();
                     executeTeleport(p, uuid);
                     return;
                 }
 
-                // =====================
-                // ActionBar
-                // =====================
                 p.spigot().sendMessage(
                         ChatMessageType.ACTION_BAR,
                         new TextComponent("Teleport (" + sec + ")")
                 );
 
-                // =====================
-                // 毎秒音（/playsound完全一致）
-                // =====================
                 p.performCommand("playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1 1");
 
                 sec--;
@@ -115,7 +98,7 @@ public class RandomTPPlugin extends JavaPlugin {
     }
 
     // =========================
-    // テレポート処理
+    // テレポート
     // =========================
     private void executeTeleport(Player player, UUID uuid) {
 
@@ -126,35 +109,61 @@ public class RandomTPPlugin extends JavaPlugin {
             return;
         }
 
-        // ワープ音
         player.performCommand("playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1 1");
 
         player.teleport(loc);
 
-        // 成功音
         player.performCommand("playsound minecraft:entity.player.levelup player @s ~ ~ ~ 1 1");
 
         startLocation.remove(uuid);
     }
 
     // =========================
-    // 安全な場所探索
+    // 安全な場所探索（軽量版）
     // =========================
     private Location findSafeLocation(World world) {
 
         int range = getConfig().getInt("rtp.range", 10000);
+        World.Environment env = world.getEnvironment();
 
-        for (int i = 0; i < 50; i++) {
+        for (int i = 0; i < 20; i++) {
 
             int x = ThreadLocalRandom.current().nextInt(-range, range);
             int z = ThreadLocalRandom.current().nextInt(-range, range);
 
-            int y = world.getHighestBlockYAt(x, z);
+            int yMin;
+            int yMax;
 
-            Location loc = new Location(world, x + 0.5, y + 1, z + 0.5);
+            // =========================
+            // ワールド別Y範囲
+            // =========================
+            switch (env) {
 
-            if (isSafe(loc)) {
-                return loc;
+                case NETHER -> {
+                    yMin = 32;
+                    yMax = 110;
+                }
+
+                case THE_END -> {
+                    yMin = 60;
+                    yMax = 120;
+                }
+
+                default -> {
+                    yMin = 64;
+                    yMax = world.getMaxHeight() - 5;
+                }
+            }
+
+            for (int y = yMax; y >= yMin; y--) {
+
+                Block block = world.getBlockAt(x, y, z);
+                Block above = world.getBlockAt(x, y + 1, z);
+                Block below = world.getBlockAt(x, y - 1, z);
+
+                if (isSafeBlock(block, above, below)) {
+                    return new Location(world, x + 0.5, y + 1, z + 0.5);
+                }
             }
         }
 
@@ -162,23 +171,19 @@ public class RandomTPPlugin extends JavaPlugin {
     }
 
     // =========================
-    // 安全判定
+    // 軽量安全判定
     // =========================
-    private boolean isSafe(Location loc) {
+    private boolean isSafeBlock(Block block, Block above, Block below) {
 
-        Material block = loc.getBlock().getType();
-        Material above = loc.clone().add(0, 1, 0).getBlock().getType();
-        Material below = loc.clone().add(0, -1, 0).getBlock().getType();
+        if (!block.isPassable()) return false;
+        if (!above.isPassable()) return false;
 
-        if (!block.isAir() || !above.isAir()) return false;
-        if (below.isAir()) return false;
+        Material b = below.getType();
 
-        if (below == Material.LAVA ||
-                below == Material.FIRE ||
-                below == Material.CACTUS ||
-                below == Material.MAGMA_BLOCK ||
-                below == Material.WATER) return false;
-
-        return true;
+        return b.isSolid()
+                && b != Material.LAVA
+                && b != Material.MAGMA_BLOCK
+                && b != Material.FIRE
+                && b != Material.CACTUS;
     }
 }
